@@ -1,0 +1,102 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot install the Rust toolchain.' }
+          rustup default stable
+
+      - name: Check the release version
+        run: |
+          $metadataJson = cargo metadata --locked --no-deps --format-version 1
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read Cargo metadata.' }
+          $metadata = $metadataJson | ConvertFrom-Json
+          $package = $metadata.packages | Where-Object name -eq 'deskora' | Select-Object -First 1
+          if (!$package -or $env:GITHUB_REF_NAME -cne "v$($package.version)") {
+            throw 'The tag must match Cargo.toml, for example v0.1.0 for version 0.1.0.'
+          }
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Check Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Install Inno Setup
+        run: |
+          if (!(Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot install Inno Setup.' }
+          }
+
+      - name: Build the installer and the portable package
+        run: ./scripts/package-windows.ps1 -RequireInstaller
+
+      - name: Write the download checksums
+        run: |
+          $lines = foreach ($name in 'Deskora-Installer.exe', 'Deskora-Windows.zip') {
+            $hash = (Get-FileHash -LiteralPath "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          $lines | Set-Content -LiteralPath dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Publish the release and its downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $releaseNotes = @'
+          ## Download per Windows x64
+
+          Scarica **Deskora-Installer.exe** e avvialo: installa Deskora per il tuo utente,
+          senza diritti di amministratore, con l'icona sul desktop se la selezioni.
+          In alternativa **Deskora-Windows.zip** contiene la versione portabile.
+          Entrambi includono gli avvisi e i testi di licenza delle dipendenze.
+          **SHA256SUMS.txt** contiene le impronte SHA-256 dei download.
+
+          Sul computer remoto deve essere attivo un server VNC compatibile.
+          Usa una rete fidata o una VPN: VNC classico non cifra il traffico.
+          '@
+          $releaseArguments = @(
+            'release', 'create', $env:GITHUB_REF_NAME,
+            'dist/Deskora-Installer.exe', 'dist/Deskora-Windows.zip', 'dist/SHA256SUMS.txt',
+            '--verify-tag', '--title', "Deskora $env:GITHUB_REF_NAME",
+            '--generate-notes', '--notes', $releaseNotes
+          )
+          if ($env:GITHUB_REF_NAME.Contains('-')) {
+            $releaseArguments += '--prerelease'
+          }
+          gh @releaseArguments
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation or upload failed.' }

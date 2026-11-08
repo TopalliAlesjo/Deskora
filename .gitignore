@@ -1,0 +1,44 @@
+# Rust build products; keep Cargo.lock for reproducible application builds.
+/target/
+/dist/
+*.exe
+*.dll
+*.pdb
+*.zip
+*.msi
+
+# Personal connection history and local configuration.
+**/preferences.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.log
+
+# Local screenshots, measurements and reverse-engineering working material.
+/shots/
+/evidence/
+/original.png
+/original-ui.json
+/mechanics.json
+/MECHANICS.md
+/PERFORMANCE.md
+/VALIDATION.md
+/docs/NOTE-PER-X.md
+
+# Editor and agent state.
+/.agents/
+/.codex/
+/.aws/
+/.vscode/
+/.idea/
+/AGENTS.md
+*.swp
+*.tmp
+*.bak
+Thumbs.db
+Desktop.ini
+.DS_Store
